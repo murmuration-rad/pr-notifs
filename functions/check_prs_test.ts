@@ -182,7 +182,6 @@ Deno.test("flags a stale review once 2+ days have passed since first 👀", asyn
 });
 
 Deno.test("nudges the author when approved but GitHub says it's not merged yet", async () => {
-  Deno.env.set("GITHUB_TOKEN", "test-token");
   let postedText = "";
 
   using _stubFetch = stub(
@@ -256,17 +255,16 @@ Deno.test("nudges the author when approved but GitHub says it's not merged yet",
   );
 
   const inputs = { channel_id: CHANNEL_ID };
-  const { error } = await CheckPrsFunction(createContext({ inputs }));
+  const { error } = await CheckPrsFunction(
+    createContext({ inputs, env: { GITHUB_TOKEN: "test-token" } }),
+  );
 
   assertEquals(error, undefined);
   assertStringIncludes(postedText, "Approved, ready to merge (1)");
   assertStringIncludes(postedText, "<@U_AUTHOR> go ahead and merge!");
-
-  Deno.env.delete("GITHUB_TOKEN");
 });
 
 Deno.test("excludes a PR from the report once GitHub confirms it's merged", async () => {
-  Deno.env.set("GITHUB_TOKEN", "test-token");
   let postedText = "";
 
   using _stubFetch = stub(
@@ -333,16 +331,15 @@ Deno.test("excludes a PR from the report once GitHub confirms it's merged", asyn
   );
 
   const inputs = { channel_id: CHANNEL_ID };
-  const { error } = await CheckPrsFunction(createContext({ inputs }));
+  const { error } = await CheckPrsFunction(
+    createContext({ inputs, env: { GITHUB_TOKEN: "test-token" } }),
+  );
 
   assertEquals(error, undefined);
   assertStringIncludes(postedText, "Approved, ready to merge (0)");
-
-  Deno.env.delete("GITHUB_TOKEN");
 });
 
 Deno.test("excludes an already-merged PR from 'needs a first look' even without any reactions", async () => {
-  Deno.env.set("GITHUB_TOKEN", "test-token");
   let postedText = "";
 
   using _stubFetch = stub(
@@ -406,16 +403,15 @@ Deno.test("excludes an already-merged PR from 'needs a first look' even without 
   );
 
   const inputs = { channel_id: CHANNEL_ID };
-  const { error } = await CheckPrsFunction(createContext({ inputs }));
+  const { error } = await CheckPrsFunction(
+    createContext({ inputs, env: { GITHUB_TOKEN: "test-token" } }),
+  );
 
   assertEquals(error, undefined);
   assertStringIncludes(postedText, "Needs a first look (0)");
-
-  Deno.env.delete("GITHUB_TOKEN");
 });
 
 Deno.test("tracks multiple PR links in one message independently, excluding merged ones", async () => {
-  Deno.env.set("GITHUB_TOKEN", "test-token");
   let postedText = "";
 
   using _stubFetch = stub(
@@ -492,14 +488,14 @@ Deno.test("tracks multiple PR links in one message independently, excluding merg
   );
 
   const inputs = { channel_id: CHANNEL_ID };
-  const { error } = await CheckPrsFunction(createContext({ inputs }));
+  const { error } = await CheckPrsFunction(
+    createContext({ inputs, env: { GITHUB_TOKEN: "test-token" } }),
+  );
 
   assertEquals(error, undefined);
   assertStringIncludes(postedText, "Needs a first look (1)");
   assertStringIncludes(postedText, "PR #21");
   assertEquals(postedText.includes("PR #20"), false);
-
-  Deno.env.delete("GITHUB_TOKEN");
 });
 
 Deno.test("counts a new 👀 once per linked PR toward the fun stat", async () => {
@@ -576,7 +572,6 @@ Deno.test("counts a new 👀 once per linked PR toward the fun stat", async () =
 });
 
 Deno.test("a ✅ on a batch message doesn't wrongly approve its other, unapproved linked PR", async () => {
-  Deno.env.set("GITHUB_TOKEN", "test-token");
   let postedText = "";
 
   using _stubFetch = stub(
@@ -659,13 +654,13 @@ Deno.test("a ✅ on a batch message doesn't wrongly approve its other, unapprove
   );
 
   const inputs = { channel_id: CHANNEL_ID };
-  const { error } = await CheckPrsFunction(createContext({ inputs }));
+  const { error } = await CheckPrsFunction(
+    createContext({ inputs, env: { GITHUB_TOKEN: "test-token" } }),
+  );
 
   assertEquals(error, undefined);
   assertStringIncludes(postedText, "Approved, ready to merge (0)");
   assertEquals(postedText.includes("go ahead and merge"), false);
   assertStringIncludes(postedText, "Needs a first look (1)");
   assertStringIncludes(postedText, "PR #424");
-
-  Deno.env.delete("GITHUB_TOKEN");
 });

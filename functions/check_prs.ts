@@ -154,8 +154,8 @@ export async function fetchGitHubMergedState(
   owner: string,
   repo: string,
   prNumber: number,
+  token: string | undefined,
 ): Promise<boolean | undefined> {
-  const token = Deno.env.get("GITHUB_TOKEN");
   if (!token) {
     console.error("GITHUB_TOKEN is not set; skipping merge check");
     return undefined;
@@ -197,8 +197,8 @@ export async function fetchGitHubApprovalState(
   owner: string,
   repo: string,
   prNumber: number,
+  token: string | undefined,
 ): Promise<boolean | undefined> {
-  const token = Deno.env.get("GITHUB_TOKEN");
   if (!token) {
     console.error("GITHUB_TOKEN is not set; skipping approval check");
     return undefined;
@@ -248,9 +248,10 @@ export async function fetchGitHubApprovalState(
 
 export default SlackFunction(
   CheckPrsFunctionDefinition,
-  async ({ inputs, client }) => {
+  async ({ inputs, client, env }) => {
     const channelId = inputs.channel_id;
     const today = todayUtc();
+    const githubToken = env["GITHUB_TOKEN"];
 
     const historyResponse = await client.conversations.history({
       channel: channelId,
@@ -332,6 +333,7 @@ export default SlackFunction(
             owner,
             repo,
             prNumber,
+            githubToken,
           );
           const merged = mergedState === true;
 
@@ -339,8 +341,12 @@ export default SlackFunction(
           // every category below regardless of approval state.
           const githubApproved = merged
             ? false
-            : (await fetchGitHubApprovalState(owner, repo, prNumber)) ===
-              true;
+            : (await fetchGitHubApprovalState(
+              owner,
+              repo,
+              prNumber,
+              githubToken,
+            )) === true;
 
           const item: PrItem = {
             pr_key: prKey,
