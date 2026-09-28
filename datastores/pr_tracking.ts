@@ -1,8 +1,11 @@
 import { DefineDatastore, Schema } from "deno-slack-sdk/mod.ts";
 
 /**
- * Tracks the review state of each PR posted to the channel, keyed by the
- * Slack message that announced it. One row per PR post.
+ * Tracks the review state of each PR linked in the channel. One row per
+ * (message, linked PR) pair — a single message can link multiple PRs (e.g.
+ * a batch "N of mine open for review" post), each tracked independently,
+ * though they share the posting message's 👀/✅ reactions since Slack can't
+ * react to just one link within a message.
  */
 const PrTrackingDatastore = DefineDatastore({
   name: "PrTracking",

@@ -25,7 +25,7 @@ const HISTORY_LIMIT = 200;
 // limits.
 const PR_PROCESSING_CONCURRENCY = 5;
 
-const PR_LINK_PATTERN = /github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/;
+const PR_LINK_PATTERN = /github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g;
 
 export const CheckPrsFunctionDefinition = DefineFunction({
   callback_id: "check_prs",
@@ -91,6 +91,36 @@ export function daysBetween(earlierDate: string, laterDate: string): number {
 
 function reactionUsers(message: SlackMessage, emojiName: string): string[] {
   return message.reactions?.find((r) => r.name === emojiName)?.users ?? [];
+}
+
+type PrLinkOccurrence = {
+  message: SlackMessage;
+  owner: string;
+  repo: string;
+  prNumber: number;
+};
+
+// A single message can link multiple PRs (e.g. a batch "N of mine open for
+// review" post). Each linked PR is tracked and merge-checked independently,
+// but they all share the same underlying Slack message, so a 👀/✅ on that
+// message is currently read as applying to every PR linked in it — Slack
+// has no way to react to just one link within a message. Revisit if this
+// stops being a good enough approximation (e.g. splitting batch posts into
+// one message per PR, or requiring some other per-PR signal).
+function extractPrLinks(message: SlackMessage): PrLinkOccurrence[] {
+  if (!message.text) return [];
+
+  const seen = new Set<string>();
+  const occurrences: PrLinkOccurrence[] = [];
+  for (const match of message.text.matchAll(PR_LINK_PATTERN)) {
+    const [, owner, repo, prNumberStr] = match;
+    const prNumber = parseInt(prNumberStr, 10);
+    const dedupeKey = `${owner}/${repo}/${prNumber}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    occurrences.push({ message, owner, repo, prNumber });
+  }
+  return occurrences;
 }
 
 export async function mapWithConcurrency<T, R>(
@@ -177,22 +207,16 @@ export default SlackFunction(
     const staleReview: { item: PrItem; reviewers: string[] }[] = [];
     const todaysLookCounts = new Map<string, number>();
 
-    const prMessages = messages.filter((message) =>
-      message.text && PR_LINK_PATTERN.test(message.text)
-    );
+    const prOccurrences = messages.flatMap(extractPrLinks);
 
     const processed = await mapWithConcurrency(
-      prMessages,
+      prOccurrences,
       PR_PROCESSING_CONCURRENCY,
-      async (message): Promise<
+      async ({ message, owner, repo, prNumber }): Promise<
         { item: PrItem; newLookerIds: string[] } | null
       > => {
-        const match = message.text!.match(PR_LINK_PATTERN)!;
-
         try {
-          const [, owner, repo, prNumberStr] = match;
-          const prNumber = parseInt(prNumberStr, 10);
-          const prKey = `${channelId}-${message.ts}`;
+          const prKey = `${channelId}-${message.ts}-${prNumber}`;
 
           const getResponse = await client.apps.datastore.get<
             typeof PrTrackingDatastore.definition
@@ -281,7 +305,9 @@ export default SlackFunction(
 
           return { item, newLookerIds };
         } catch (err) {
-          console.error(`Failed to process message ${message.ts}: ${err}`);
+          console.error(
+            `Failed to process ${owner}/${repo}#${prNumber} from message ${message.ts}: ${err}`,
+          );
           return null;
         }
       },
