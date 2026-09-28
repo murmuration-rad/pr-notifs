@@ -404,6 +404,8 @@ export default SlackFunction(
     const postResponse = await client.chat.postMessage({
       channel: channelId,
       text: "Beginning of day PR summary",
+      unfurl_links: false,
+      unfurl_media: false,
       blocks: [
         {
           type: "section",
