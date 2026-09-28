@@ -238,15 +238,16 @@ export default SlackFunction(
             ? (existing.first_seen_looking_date || today)
             : (existing.first_seen_looking_date ?? "");
 
-          let merged = false;
-          if (hasApprovedNow) {
-            const mergedState = await fetchGitHubMergedState(
-              owner,
-              repo,
-              prNumber,
-            );
-            merged = mergedState === true;
-          }
+          // Always check GitHub's actual merge status, not just when
+          // approved in Slack — a PR can get merged without ever picking up
+          // a 👀 or ✅ reaction (e.g. merged directly on GitHub), and we'd
+          // otherwise keep reporting it as needing a first look forever.
+          const mergedState = await fetchGitHubMergedState(
+            owner,
+            repo,
+            prNumber,
+          );
+          const merged = mergedState === true;
 
           const item: PrItem = {
             pr_key: prKey,

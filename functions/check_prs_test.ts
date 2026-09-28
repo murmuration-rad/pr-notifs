@@ -314,3 +314,70 @@ Deno.test("excludes a PR from the report once GitHub confirms it's merged", asyn
 
   Deno.env.delete("GITHUB_TOKEN");
 });
+
+Deno.test("excludes an already-merged PR from 'needs a first look' even without any reactions", async () => {
+  Deno.env.set("GITHUB_TOKEN", "test-token");
+  let postedText = "";
+
+  using _stubFetch = stub(
+    globalThis,
+    "fetch",
+    async (url: string | URL | Request, options?: RequestInit) => {
+      const request = url instanceof Request ? url : new Request(url, options);
+
+      if (request.url === "https://slack.com/api/conversations.history") {
+        return jsonResponse({
+          ok: true,
+          messages: [
+            {
+              ts: "1000.0005",
+              user: "U_AUTHOR",
+              text: "New PR: https://github.com/acme/widgets/pull/11",
+            },
+          ],
+        });
+      }
+      if (request.url === "https://slack.com/api/apps.datastore.get") {
+        const body = await request.formData();
+        return jsonResponse({
+          ok: true,
+          datastore: body.get("datastore"),
+          item: {},
+        });
+      }
+      if (request.url === "https://slack.com/api/chat.getPermalink") {
+        return jsonResponse({
+          ok: true,
+          permalink: "https://acme.slack.com/archives/C0123456789/p10000005",
+        });
+      }
+      if (
+        request.url === "https://api.github.com/repos/acme/widgets/pulls/11"
+      ) {
+        return jsonResponse({ merged: true, state: "closed" });
+      }
+      if (request.url === "https://slack.com/api/apps.datastore.put") {
+        const body = await request.formData();
+        return jsonResponse({
+          ok: true,
+          datastore: body.get("datastore"),
+          item: JSON.parse(body.get("item") as string),
+        });
+      }
+      if (request.url === "https://slack.com/api/chat.postMessage") {
+        const body = await request.formData();
+        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        return jsonResponse({ ok: true, ts: "2000.0005" });
+      }
+      throw new Error(`Unexpected fetch to ${request.url}`);
+    },
+  );
+
+  const inputs = { channel_id: CHANNEL_ID };
+  const { error } = await CheckPrsFunction(createContext({ inputs }));
+
+  assertEquals(error, undefined);
+  assertStringIncludes(postedText, "Needs a first look* (0)");
+
+  Deno.env.delete("GITHUB_TOKEN");
+});
