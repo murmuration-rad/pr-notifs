@@ -18,6 +18,13 @@ const STALE_REVIEW_DAYS = 2;
 // How far back into channel history to look each run.
 const HISTORY_LIMIT = 200;
 
+// How many PR messages to process concurrently. Each one does several
+// sequential Slack/GitHub API calls, so processing a busy channel's backlog
+// one message at a time can take long enough to trip local dev's websocket
+// idle timeout. Capped (rather than unbounded) to stay polite to API rate
+// limits.
+const PR_PROCESSING_CONCURRENCY = 5;
+
 const PR_LINK_PATTERN = /github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/;
 
 export const CheckPrsFunctionDefinition = DefineFunction({
@@ -86,6 +93,27 @@ function reactionUsers(message: SlackMessage, emojiName: string): string[] {
   return message.reactions?.find((r) => r.name === emojiName)?.users ?? [];
 }
 
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await fn(items[index]);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+
 // Auth: uses a personal access token for now (fine for the experiment
 // stage). A GitHub App is the recommended long-term pattern for this kind
 // of unattended read-only automation — see the "Future Improvements"
@@ -149,124 +177,138 @@ export default SlackFunction(
     const staleReview: { item: PrItem; reviewers: string[] }[] = [];
     const todaysLookCounts = new Map<string, number>();
 
-    for (const message of messages) {
-      if (!message.text) continue;
-      const match = message.text.match(PR_LINK_PATTERN);
-      if (!match) continue;
+    const prMessages = messages.filter((message) =>
+      message.text && PR_LINK_PATTERN.test(message.text)
+    );
 
-      try {
-        const [, owner, repo, prNumberStr] = match;
-        const prNumber = parseInt(prNumberStr, 10);
-        const prKey = `${channelId}-${message.ts}`;
+    const processed = await mapWithConcurrency(
+      prMessages,
+      PR_PROCESSING_CONCURRENCY,
+      async (message): Promise<
+        { item: PrItem; newLookerIds: string[] } | null
+      > => {
+        const match = message.text!.match(PR_LINK_PATTERN)!;
 
-        const getResponse = await client.apps.datastore.get<
-          typeof PrTrackingDatastore.definition
-        >({
-          datastore: "PrTracking",
-          id: prKey,
-        });
-        if (!getResponse.ok) {
-          console.error(
-            `Failed to read PR tracking record for ${prKey}: ${getResponse.error}`,
-          );
-          continue;
-        }
+        try {
+          const [, owner, repo, prNumberStr] = match;
+          const prNumber = parseInt(prNumberStr, 10);
+          const prKey = `${channelId}-${message.ts}`;
 
-        const existing = getResponse.item as Partial<PrItem>;
-        if (existing.merged === true) continue;
-
-        const isNewRecord = !existing.pr_key;
-
-        let permalink = existing.permalink;
-        if (!permalink) {
-          const permalinkResponse = await client.chat.getPermalink({
-            channel: channelId,
-            message_ts: message.ts,
+          const getResponse = await client.apps.datastore.get<
+            typeof PrTrackingDatastore.definition
+          >({
+            datastore: "PrTracking",
+            id: prKey,
           });
-          permalink = permalinkResponse.ok
-            ? (permalinkResponse.permalink as string)
-            : "";
-        }
-
-        const lookingUsersNow = reactionUsers(message, EMOJI_LOOKING);
-        const hasApprovedNow =
-          reactionUsers(message, EMOJI_APPROVED).length > 0;
-        const previousLookers = existing.looking_user_ids ?? [];
-
-        if (!isNewRecord) {
-          for (const userId of lookingUsersNow) {
-            if (!previousLookers.includes(userId)) {
-              todaysLookCounts.set(
-                userId,
-                (todaysLookCounts.get(userId) ?? 0) + 1,
-              );
-            }
+          if (!getResponse.ok) {
+            console.error(
+              `Failed to read PR tracking record for ${prKey}: ${getResponse.error}`,
+            );
+            return null;
           }
-        }
 
-        const firstSeenLookingDate = lookingUsersNow.length > 0
-          ? (existing.first_seen_looking_date || today)
-          : (existing.first_seen_looking_date ?? "");
+          const existing = getResponse.item as Partial<PrItem>;
+          if (existing.merged === true) return null;
 
-        let merged = false;
-        if (hasApprovedNow) {
-          const mergedState = await fetchGitHubMergedState(
-            owner,
-            repo,
-            prNumber,
-          );
-          merged = mergedState === true;
-        }
+          const isNewRecord = !existing.pr_key;
 
-        const item: PrItem = {
-          pr_key: prKey,
-          channel_id: channelId,
-          message_ts: message.ts,
-          permalink: permalink ?? "",
-          github_owner: owner,
-          github_repo: repo,
-          pr_number: prNumber,
-          author_user_id: existing.author_user_id || message.user || "",
-          has_looking: lookingUsersNow.length > 0,
-          has_approved: hasApprovedNow,
-          first_seen_looking_date: firstSeenLookingDate,
-          looking_user_ids: lookingUsersNow,
-          merged,
-          last_checked_date: today,
-        };
+          let permalink = existing.permalink;
+          if (!permalink) {
+            const permalinkResponse = await client.chat.getPermalink({
+              channel: channelId,
+              message_ts: message.ts,
+            });
+            permalink = permalinkResponse.ok
+              ? (permalinkResponse.permalink as string)
+              : "";
+          }
 
-        const putResponse = await client.apps.datastore.put<
-          typeof PrTrackingDatastore.definition
-        >({
-          datastore: "PrTracking",
-          item,
-        });
-        if (!putResponse.ok) {
-          console.error(
-            `Failed to save PR tracking record for ${prKey}: ${putResponse.error}`,
-          );
-          continue;
-        }
+          const lookingUsersNow = reactionUsers(message, EMOJI_LOOKING);
+          const hasApprovedNow =
+            reactionUsers(message, EMOJI_APPROVED).length > 0;
+          const previousLookers = existing.looking_user_ids ?? [];
 
-        if (merged) continue;
+          const newLookerIds = isNewRecord
+            ? []
+            : lookingUsersNow.filter((userId) =>
+              !previousLookers.includes(userId)
+            );
 
-        if (!item.has_looking && !item.has_approved) {
-          needsFirstLook.push(item);
+          const firstSeenLookingDate = lookingUsersNow.length > 0
+            ? (existing.first_seen_looking_date || today)
+            : (existing.first_seen_looking_date ?? "");
+
+          let merged = false;
+          if (hasApprovedNow) {
+            const mergedState = await fetchGitHubMergedState(
+              owner,
+              repo,
+              prNumber,
+            );
+            merged = mergedState === true;
+          }
+
+          const item: PrItem = {
+            pr_key: prKey,
+            channel_id: channelId,
+            message_ts: message.ts,
+            permalink: permalink ?? "",
+            github_owner: owner,
+            github_repo: repo,
+            pr_number: prNumber,
+            author_user_id: existing.author_user_id || message.user || "",
+            has_looking: lookingUsersNow.length > 0,
+            has_approved: hasApprovedNow,
+            first_seen_looking_date: firstSeenLookingDate,
+            looking_user_ids: lookingUsersNow,
+            merged,
+            last_checked_date: today,
+          };
+
+          const putResponse = await client.apps.datastore.put<
+            typeof PrTrackingDatastore.definition
+          >({
+            datastore: "PrTracking",
+            item,
+          });
+          if (!putResponse.ok) {
+            console.error(
+              `Failed to save PR tracking record for ${prKey}: ${putResponse.error}`,
+            );
+            return null;
+          }
+
+          return { item, newLookerIds };
+        } catch (err) {
+          console.error(`Failed to process message ${message.ts}: ${err}`);
+          return null;
         }
-        if (item.has_approved) {
-          approvedNotMerged.push(item);
-        }
-        if (
-          item.has_looking && !item.has_approved &&
-          item.first_seen_looking_date &&
-          daysBetween(item.first_seen_looking_date, today) >=
-            STALE_REVIEW_DAYS
-        ) {
-          staleReview.push({ item, reviewers: item.looking_user_ids });
-        }
-      } catch (err) {
-        console.error(`Failed to process message ${message.ts}: ${err}`);
-        continue;
+      },
+    );
+
+    for (const result of processed) {
+      if (!result) continue;
+      const { item, newLookerIds } = result;
+
+      for (const userId of newLookerIds) {
+        todaysLookCounts.set(userId, (todaysLookCounts.get(userId) ?? 0) + 1);
+      }
+
+      if (item.merged) continue;
+
+      if (!item.has_looking && !item.has_approved) {
+        needsFirstLook.push(item);
+      }
+      if (item.has_approved) {
+        approvedNotMerged.push(item);
+      }
+      if (
+        item.has_looking && !item.has_approved &&
+        item.first_seen_looking_date &&
+        daysBetween(item.first_seen_looking_date, today) >=
+          STALE_REVIEW_DAYS
+      ) {
+        staleReview.push({ item, reviewers: item.looking_user_ids });
       }
     }
 

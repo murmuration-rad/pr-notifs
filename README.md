@@ -159,19 +159,19 @@ $ slack activity --tail
 
 ## Future Improvements
 
-**Auth: migrate from PAT to a GitHub App.** This bot currently authenticates
-to GitHub with a personal access token (see `fetchGitHubMergedState` in
-`functions/check_prs.ts`). That's fine for the current experiment stage, but
-a GitHub App is the better long-term pattern for this kind of narrow,
-unattended, read-only automation: it's scoped to an install rather than a
-person's account, issues short-lived tokens, and doesn't break if whoever
-created the PAT leaves. It's more setup (register an app, generate a private
-key, install it on the relevant repo(s), sign a JWT and exchange it for an
-installation access token on each run instead of reading a static token from
-env) so it's been deferred until this graduates past experiment. See
+**Auth: migrate from PAT to a GitHub App.** This bot currently authenticates to
+GitHub with a personal access token (see `fetchGitHubMergedState` in
+`functions/check_prs.ts`). That's fine for the current experiment stage, but a
+GitHub App is the better long-term pattern for this kind of narrow, unattended,
+read-only automation: it's scoped to an install rather than a person's account,
+issues short-lived tokens, and doesn't break if whoever created the PAT leaves.
+It's more setup (register an app, generate a private key, install it on the
+relevant repo(s), sign a JWT and exchange it for an installation access token on
+each run instead of reading a static token from env) so it's been deferred until
+this graduates past experiment. See
 [murmuration-rad/pr-notifs#1](https://github.com/murmuration-rad/pr-notifs/issues/1)
-for the tracking issue. `fetchGitHubMergedState` is the only place GitHub
-auth happens, so swapping it out later should be a self-contained change.
+for the tracking issue. `fetchGitHubMergedState` is the only place GitHub auth
+happens, so swapping it out later should be a self-contained change.
 
 ## Resources
 

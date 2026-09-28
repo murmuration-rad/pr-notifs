@@ -1,7 +1,11 @@
 import { SlackFunctionTester } from "deno-slack-sdk/mod.ts";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { stub } from "@std/testing/mock";
-import CheckPrsFunction, { daysBetween, todayUtc } from "./check_prs.ts";
+import CheckPrsFunction, {
+  daysBetween,
+  mapWithConcurrency,
+  todayUtc,
+} from "./check_prs.ts";
 
 const { createContext } = SlackFunctionTester("check_prs");
 
@@ -19,6 +23,22 @@ Deno.test("daysBetween computes whole day differences", () => {
 Deno.test("todayUtc returns a YYYY-MM-DD string", () => {
   assertStringIncludes(todayUtc(), "-");
   assertEquals(todayUtc().length, 10);
+});
+
+Deno.test("mapWithConcurrency preserves result order and caps concurrency", async () => {
+  let concurrent = 0;
+  let maxConcurrent = 0;
+
+  const results = await mapWithConcurrency([5, 4, 3, 2, 1, 0], 2, async (n) => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    await new Promise((resolve) => setTimeout(resolve, n));
+    concurrent--;
+    return n * 10;
+  });
+
+  assertEquals(results, [50, 40, 30, 20, 10, 0]);
+  assertEquals(maxConcurrent <= 2, true);
 });
 
 Deno.test("flags a brand new PR post as needing a first look", async () => {
