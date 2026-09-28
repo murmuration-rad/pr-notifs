@@ -86,6 +86,11 @@ function reactionUsers(message: SlackMessage, emojiName: string): string[] {
   return message.reactions?.find((r) => r.name === emojiName)?.users ?? [];
 }
 
+// Auth: uses a personal access token for now (fine for the experiment
+// stage). A GitHub App is the recommended long-term pattern for this kind
+// of unattended read-only automation — see the "Future Improvements"
+// section in the README. This function is the only place GitHub auth
+// happens, so it should be a self-contained swap later.
 export async function fetchGitHubMergedState(
   owner: string,
   repo: string,
