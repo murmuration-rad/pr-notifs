@@ -111,11 +111,21 @@ compare against for PRs first seen before the bot was deployed.
 A single message can link multiple PRs (e.g. a batch "N of mine open for review"
 post). Each linked PR is tracked and merge-checked independently, so a batch
 message with some PRs already merged and some still open will only show the
-still-open ones. But since Slack reactions apply to the whole message, not to
-individual links within it, a 👀/✅ on a batch message is currently read as
-applying to _every_ PR linked in it — there's no way to react to just one.
-That's a known simplification worth revisiting later if it stops holding up well
-in practice — see
+still-open ones.
+
+"Approved, ready to merge" is based on GitHub's actual review state per PR
+(`fetchGitHubApprovalState` in `functions/check_prs.ts`), not the Slack ✅
+reaction — a message's ✅ can't tell us which specific linked PR it was meant
+for, so trusting it directly caused a real bug: a ✅ meant for PR B in a 2-PR
+message was making PR A show up as "ready to merge" too, even though A had no
+actual approval. Checking GitHub directly avoids that regardless of how many PRs
+a message links.
+
+👀/"looking" doesn't have a GitHub-side equivalent to check against, so it's
+still read from the shared Slack reaction — a 👀 on a batch message is treated
+as applying to _every_ PR linked in it, since there's no way to react to just
+one. That's a known simplification worth revisiting later if it stops holding up
+well in practice — see
 [murmuration-rad/pr-notifs#2](https://github.com/murmuration-rad/pr-notifs/issues/2).
 
 State (per-PR review status and per-person stats) lives in two

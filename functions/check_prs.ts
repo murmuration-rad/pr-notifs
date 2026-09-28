@@ -64,6 +64,7 @@ type PrItem = {
   author_user_id: string;
   has_looking: boolean;
   has_approved: boolean;
+  github_approved: boolean;
   first_seen_looking_date: string;
   looking_user_ids: string[];
   merged: boolean;
@@ -184,6 +185,67 @@ export async function fetchGitHubMergedState(
   }
 }
 
+type GitHubReview = { user?: { login?: string }; state?: string };
+
+// A message linking multiple PRs shares one set of Slack reactions, so a ✅
+// on the message doesn't tell us which specific linked PR was actually
+// approved (see the README's "How it works" section / issue #2). This asks
+// GitHub for each PR's real review state instead, which has no such
+// ambiguity, and uses it (not the shared Slack reaction) to decide
+// "approved, ready to merge".
+export async function fetchGitHubApprovalState(
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<boolean | undefined> {
+  const token = Deno.env.get("GITHUB_TOKEN");
+  if (!token) {
+    console.error("GITHUB_TOKEN is not set; skipping approval check");
+    return undefined;
+  }
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
+      {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Accept": "application/vnd.github+json",
+          "User-Agent": "pr-notifs-slack-bot",
+        },
+      },
+    );
+    if (!res.ok) {
+      console.error(
+        `GitHub API returned ${res.status} for ${owner}/${repo}#${prNumber} reviews`,
+      );
+      return undefined;
+    }
+    const reviews = await res.json() as GitHubReview[];
+
+    // Reviews come back oldest-first, and GitHub supersedes each reviewer's
+    // earlier review with their later one — keep only the latest verdict
+    // per reviewer.
+    const latestStateByReviewer = new Map<string, string>();
+    for (const review of reviews) {
+      const reviewerId = review.user?.login;
+      if (!reviewerId || !review.state || review.state === "COMMENTED") {
+        continue;
+      }
+      latestStateByReviewer.set(reviewerId, review.state);
+    }
+
+    const states = [...latestStateByReviewer.values()];
+    const hasApproval = states.includes("APPROVED");
+    const hasOutstandingChangesRequested = states.includes(
+      "CHANGES_REQUESTED",
+    );
+    return hasApproval && !hasOutstandingChangesRequested;
+  } catch (err) {
+    console.error(`GitHub API request failed: ${err}`);
+    return undefined;
+  }
+}
+
 export default SlackFunction(
   CheckPrsFunctionDefinition,
   async ({ inputs, client }) => {
@@ -273,6 +335,13 @@ export default SlackFunction(
           );
           const merged = mergedState === true;
 
+          // Skip the extra API call once merged — it'll be excluded from
+          // every category below regardless of approval state.
+          const githubApproved = merged
+            ? false
+            : (await fetchGitHubApprovalState(owner, repo, prNumber)) ===
+              true;
+
           const item: PrItem = {
             pr_key: prKey,
             channel_id: channelId,
@@ -284,6 +353,7 @@ export default SlackFunction(
             author_user_id: existing.author_user_id || message.user || "",
             has_looking: lookingUsersNow.length > 0,
             has_approved: hasApprovedNow,
+            github_approved: githubApproved,
             first_seen_looking_date: firstSeenLookingDate,
             looking_user_ids: lookingUsersNow,
             merged,
@@ -323,14 +393,17 @@ export default SlackFunction(
 
       if (item.merged) continue;
 
-      if (!item.has_looking && !item.has_approved) {
+      // Categorization uses GitHub's real approval state (item.github_approved),
+      // not the shared Slack ✅ reaction (item.has_approved) — see the
+      // fetchGitHubApprovalState comment above for why.
+      if (!item.has_looking && !item.github_approved) {
         needsFirstLook.push(item);
       }
-      if (item.has_approved) {
+      if (item.github_approved) {
         approvedNotMerged.push(item);
       }
       if (
-        item.has_looking && !item.has_approved &&
+        item.has_looking && !item.github_approved &&
         item.first_seen_looking_date &&
         daysBetween(item.first_seen_looking_date, today) >=
           STALE_REVIEW_DAYS

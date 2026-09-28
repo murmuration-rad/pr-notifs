@@ -38,7 +38,17 @@ const PrTrackingDatastore = DefineDatastore({
     has_looking: {
       type: Schema.types.boolean,
     },
+    // Whether the message carries a ✅ reaction. Informational only — not
+    // used to decide "approved, ready to merge" (see github_approved),
+    // since a message can link multiple PRs and the reaction can't tell us
+    // which one it was actually meant for.
     has_approved: {
+      type: Schema.types.boolean,
+    },
+    // Whether GitHub's own review state shows this specific PR approved
+    // (an APPROVED review with no later CHANGES_REQUESTED). This, not
+    // has_approved, is what "approved, ready to merge" is based on.
+    github_approved: {
       type: Schema.types.boolean,
     },
     // YYYY-MM-DD date the 👀 reaction was first observed, or "" if never seen

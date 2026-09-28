@@ -218,6 +218,14 @@ Deno.test("nudges the author when approved but GitHub says it's not merged yet",
         assertEquals(request.headers.get("Authorization"), "Bearer test-token");
         return jsonResponse({ merged: false, state: "open" });
       }
+      if (
+        request.url ===
+          "https://api.github.com/repos/acme/widgets/pulls/9/reviews"
+      ) {
+        return jsonResponse([
+          { user: { login: "reviewer1" }, state: "APPROVED" },
+        ]);
+      }
       if (request.url === "https://slack.com/api/apps.datastore.put") {
         const body = await request.formData();
         return jsonResponse({
@@ -430,6 +438,12 @@ Deno.test("tracks multiple PR links in one message independently, excluding merg
       ) {
         return jsonResponse({ merged: false, state: "open" });
       }
+      if (
+        request.url ===
+          "https://api.github.com/repos/acme/widgets/pulls/21/reviews"
+      ) {
+        return jsonResponse([]);
+      }
       if (request.url === "https://slack.com/api/apps.datastore.put") {
         const body = await request.formData();
         return jsonResponse({
@@ -523,4 +537,93 @@ Deno.test("counts a new 👀 once per linked PR toward the fun stat", async () =
 
   assertEquals(error, undefined);
   assertStringIncludes(postedText, "<@U_REVIEWER> reviewed 2 PRs today");
+});
+
+Deno.test("a ✅ on a batch message doesn't wrongly approve its other, unapproved linked PR", async () => {
+  Deno.env.set("GITHUB_TOKEN", "test-token");
+  let postedText = "";
+
+  using _stubFetch = stub(
+    globalThis,
+    "fetch",
+    async (url: string | URL | Request, options?: RequestInit) => {
+      const request = url instanceof Request ? url : new Request(url, options);
+
+      if (request.url === "https://slack.com/api/conversations.history") {
+        return jsonResponse({
+          ok: true,
+          messages: [
+            {
+              ts: "1000.0008",
+              user: "U_AUTHOR",
+              text: "2 of mine open for review:\n" +
+                "https://github.com/acme/widgets/pull/424\n" +
+                "https://github.com/acme/widgets/pull/432",
+              reactions: [
+                { name: "white_check_mark", users: ["U_REVIEWER"], count: 1 },
+              ],
+            },
+          ],
+        });
+      }
+      if (request.url === "https://slack.com/api/apps.datastore.get") {
+        const body = await request.formData();
+        return jsonResponse({
+          ok: true,
+          datastore: body.get("datastore"),
+          item: {},
+        });
+      }
+      if (request.url === "https://slack.com/api/chat.getPermalink") {
+        return jsonResponse({
+          ok: true,
+          permalink: "https://acme.slack.com/archives/C0123456789/p10000008",
+        });
+      }
+      // #432 is actually approved and merged.
+      if (
+        request.url === "https://api.github.com/repos/acme/widgets/pulls/432"
+      ) {
+        return jsonResponse({ merged: true, state: "closed" });
+      }
+      // #424 is still open, unreviewed — this is the one wrongly nudged as
+      // "ready to merge" before this fix, since it shared #432's ✅ reaction.
+      if (
+        request.url === "https://api.github.com/repos/acme/widgets/pulls/424"
+      ) {
+        return jsonResponse({ merged: false, state: "open" });
+      }
+      if (
+        request.url ===
+          "https://api.github.com/repos/acme/widgets/pulls/424/reviews"
+      ) {
+        return jsonResponse([]);
+      }
+      if (request.url === "https://slack.com/api/apps.datastore.put") {
+        const body = await request.formData();
+        return jsonResponse({
+          ok: true,
+          datastore: body.get("datastore"),
+          item: JSON.parse(body.get("item") as string),
+        });
+      }
+      if (request.url === "https://slack.com/api/chat.postMessage") {
+        const body = await request.formData();
+        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        return jsonResponse({ ok: true, ts: "2000.0008" });
+      }
+      throw new Error(`Unexpected fetch to ${request.url}`);
+    },
+  );
+
+  const inputs = { channel_id: CHANNEL_ID };
+  const { error } = await CheckPrsFunction(createContext({ inputs }));
+
+  assertEquals(error, undefined);
+  assertStringIncludes(postedText, "Approved, ready to merge* (0)");
+  assertEquals(postedText.includes("go ahead and merge"), false);
+  assertStringIncludes(postedText, "Needs a first look* (1)");
+  assertStringIncludes(postedText, "PR #424");
+
+  Deno.env.delete("GITHUB_TOKEN");
 });
