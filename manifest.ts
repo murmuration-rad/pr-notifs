@@ -9,10 +9,10 @@ import ReviewStatsDatastore from "./datastores/review_stats.ts";
  * https://api.slack.com/automation/manifest
  */
 export default Manifest({
-  name: "pr-notifs",
+  name: "Code Review Updates",
   description:
     "Posts a beginning-of-day summary of stalled PR reviews to #rad-eng-pull-requests",
-  icon: "assets/default_new_app_icon.png",
+  icon: "assets/code-reviews.png",
   workflows: [DailySummaryWorkflow],
   outgoingDomains: ["api.github.com"],
   datastores: [PrTrackingDatastore, ReviewStatsDatastore],

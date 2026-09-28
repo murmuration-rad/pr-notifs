@@ -160,7 +160,13 @@ Deno.test("flags a stale review once 2+ days have passed since first 👀", asyn
       }
       if (request.url === "https://slack.com/api/chat.postMessage") {
         const body = await request.formData();
-        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
         return jsonResponse({ ok: true, ts: "2000.0002" });
       }
       throw new Error(`Unexpected fetch to ${request.url}`);
@@ -172,7 +178,7 @@ Deno.test("flags a stale review once 2+ days have passed since first 👀", asyn
 
   assertEquals(error, undefined);
   assertStringIncludes(postedText, "<@U_REVIEWER>");
-  assertStringIncludes(postedText, "Stale reviews* (1)");
+  assertStringIncludes(postedText, "Stale reviews (1)");
 });
 
 Deno.test("nudges the author when approved but GitHub says it's not merged yet", async () => {
@@ -236,7 +242,13 @@ Deno.test("nudges the author when approved but GitHub says it's not merged yet",
       }
       if (request.url === "https://slack.com/api/chat.postMessage") {
         const body = await request.formData();
-        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
         return jsonResponse({ ok: true, ts: "2000.0003" });
       }
       throw new Error(`Unexpected fetch to ${request.url}`);
@@ -247,7 +259,7 @@ Deno.test("nudges the author when approved but GitHub says it's not merged yet",
   const { error } = await CheckPrsFunction(createContext({ inputs }));
 
   assertEquals(error, undefined);
-  assertStringIncludes(postedText, "Approved, ready to merge* (1)");
+  assertStringIncludes(postedText, "Approved, ready to merge (1)");
   assertStringIncludes(postedText, "<@U_AUTHOR> go ahead and merge!");
 
   Deno.env.delete("GITHUB_TOKEN");
@@ -307,7 +319,13 @@ Deno.test("excludes a PR from the report once GitHub confirms it's merged", asyn
       }
       if (request.url === "https://slack.com/api/chat.postMessage") {
         const body = await request.formData();
-        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
         return jsonResponse({ ok: true, ts: "2000.0004" });
       }
       throw new Error(`Unexpected fetch to ${request.url}`);
@@ -318,7 +336,7 @@ Deno.test("excludes a PR from the report once GitHub confirms it's merged", asyn
   const { error } = await CheckPrsFunction(createContext({ inputs }));
 
   assertEquals(error, undefined);
-  assertStringIncludes(postedText, "Approved, ready to merge* (0)");
+  assertStringIncludes(postedText, "Approved, ready to merge (0)");
 
   Deno.env.delete("GITHUB_TOKEN");
 });
@@ -374,7 +392,13 @@ Deno.test("excludes an already-merged PR from 'needs a first look' even without 
       }
       if (request.url === "https://slack.com/api/chat.postMessage") {
         const body = await request.formData();
-        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
         return jsonResponse({ ok: true, ts: "2000.0005" });
       }
       throw new Error(`Unexpected fetch to ${request.url}`);
@@ -385,7 +409,7 @@ Deno.test("excludes an already-merged PR from 'needs a first look' even without 
   const { error } = await CheckPrsFunction(createContext({ inputs }));
 
   assertEquals(error, undefined);
-  assertStringIncludes(postedText, "Needs a first look* (0)");
+  assertStringIncludes(postedText, "Needs a first look (0)");
 
   Deno.env.delete("GITHUB_TOKEN");
 });
@@ -454,7 +478,13 @@ Deno.test("tracks multiple PR links in one message independently, excluding merg
       }
       if (request.url === "https://slack.com/api/chat.postMessage") {
         const body = await request.formData();
-        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
         return jsonResponse({ ok: true, ts: "2000.0006" });
       }
       throw new Error(`Unexpected fetch to ${request.url}`);
@@ -465,7 +495,7 @@ Deno.test("tracks multiple PR links in one message independently, excluding merg
   const { error } = await CheckPrsFunction(createContext({ inputs }));
 
   assertEquals(error, undefined);
-  assertStringIncludes(postedText, "Needs a first look* (1)");
+  assertStringIncludes(postedText, "Needs a first look (1)");
   assertStringIncludes(postedText, "PR #21");
   assertEquals(postedText.includes("PR #20"), false);
 
@@ -525,7 +555,13 @@ Deno.test("counts a new 👀 once per linked PR toward the fun stat", async () =
       }
       if (request.url === "https://slack.com/api/chat.postMessage") {
         const body = await request.formData();
-        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
         return jsonResponse({ ok: true, ts: "2000.0007" });
       }
       throw new Error(`Unexpected fetch to ${request.url}`);
@@ -609,7 +645,13 @@ Deno.test("a ✅ on a batch message doesn't wrongly approve its other, unapprove
       }
       if (request.url === "https://slack.com/api/chat.postMessage") {
         const body = await request.formData();
-        postedText = (JSON.parse(body.get("blocks") as string))[0].text.text;
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
         return jsonResponse({ ok: true, ts: "2000.0008" });
       }
       throw new Error(`Unexpected fetch to ${request.url}`);
@@ -620,9 +662,9 @@ Deno.test("a ✅ on a batch message doesn't wrongly approve its other, unapprove
   const { error } = await CheckPrsFunction(createContext({ inputs }));
 
   assertEquals(error, undefined);
-  assertStringIncludes(postedText, "Approved, ready to merge* (0)");
+  assertStringIncludes(postedText, "Approved, ready to merge (0)");
   assertEquals(postedText.includes("go ahead and merge"), false);
-  assertStringIncludes(postedText, "Needs a first look* (1)");
+  assertStringIncludes(postedText, "Needs a first look (1)");
   assertStringIncludes(postedText, "PR #424");
 
   Deno.env.delete("GITHUB_TOKEN");

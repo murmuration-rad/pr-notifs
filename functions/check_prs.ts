@@ -467,51 +467,61 @@ export default SlackFunction(
       }
     }
 
-    const lines: string[] = [];
-    lines.push("*:sunrise: Good morning! Here's today's PR status:*");
+    function headerBlock(text: string) {
+      return {
+        type: "header",
+        text: { type: "plain_text", text, emoji: true },
+      };
+    }
 
-    lines.push(`\n*Needs a first look* (${needsFirstLook.length})`);
-    lines.push(
-      needsFirstLook.length
-        ? needsFirstLook.map((i) =>
-          `• <${i.permalink}|PR #${i.pr_number}> — no reviewer yet`
-        ).join("\n")
-        : "_Nothing waiting — nice!_",
-    );
+    function sectionBlock(text: string) {
+      return { type: "section", text: { type: "mrkdwn", text } };
+    }
 
-    lines.push(`\n*Approved, ready to merge* (${approvedNotMerged.length})`);
-    lines.push(
-      approvedNotMerged.length
-        ? approvedNotMerged.map((i) =>
-          `• <${i.permalink}|PR #${i.pr_number}> — <@${i.author_user_id}> go ahead and merge!`
-        ).join("\n")
-        : "_Nothing waiting on a merge._",
-    );
-
-    lines.push(`\n*Stale reviews* (${staleReview.length})`);
-    lines.push(
-      staleReview.length
-        ? staleReview.map(({ item, reviewers }) =>
-          `• <${item.permalink}|PR #${item.pr_number}> — ${
-            reviewers.map((r) => `<@${r}>`).join(", ")
-          } still looking, or should someone else take a pass?`
-        ).join("\n")
-        : "_No reviews stuck._",
-    );
-
-    lines.push(`\n${funStatLine}`);
+    const blocks = [
+      headerBlock(":sunrise: Good morning! Here's today's PR status"),
+      headerBlock(
+        `:${EMOJI_LOOKING}: Needs a first look (${needsFirstLook.length})`,
+      ),
+      sectionBlock(
+        needsFirstLook.length
+          ? needsFirstLook.map((i) =>
+            `• <${i.permalink}|PR #${i.pr_number}> — no reviewer yet`
+          ).join("\n")
+          : "_Nothing waiting — nice!_",
+      ),
+      headerBlock(
+        `:${EMOJI_APPROVED}: Approved, ready to merge (${approvedNotMerged.length})`,
+      ),
+      sectionBlock(
+        approvedNotMerged.length
+          ? approvedNotMerged.map((i) =>
+            `• <${i.permalink}|PR #${i.pr_number}> — <@${i.author_user_id}> go ahead and merge!`
+          ).join("\n")
+          : "_Nothing waiting on a merge._",
+      ),
+      headerBlock(
+        `:arrows_counterclockwise: Stale reviews (${staleReview.length})`,
+      ),
+      sectionBlock(
+        staleReview.length
+          ? staleReview.map(({ item, reviewers }) =>
+            `• <${item.permalink}|PR #${item.pr_number}> — ${
+              reviewers.map((r) => `<@${r}>`).join(", ")
+            } still looking, or should someone else take a pass?`
+          ).join("\n")
+          : "_No reviews stuck._",
+      ),
+      { type: "divider" },
+      { type: "context", elements: [{ type: "mrkdwn", text: funStatLine }] },
+    ];
 
     const postResponse = await client.chat.postMessage({
       channel: channelId,
       text: "Beginning of day PR summary",
       unfurl_links: false,
       unfurl_media: false,
-      blocks: [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: lines.join("\n") },
-        },
-      ],
+      blocks,
     });
     if (!postResponse.ok) {
       return {
