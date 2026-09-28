@@ -6,7 +6,8 @@ import { PR_CHANNEL_ID } from "./config.ts";
 /**
  * Fires weekday mornings at 9am America/New_York (DST-aware via the
  * `timezone` field). `start_time` is just an anchor date/time for the
- * recurrence to compute from; a Monday was chosen arbitrarily.
+ * recurrence to compute from — currently set to the Friday the team's
+ * back from retreat.
  */
 const dailySummarySchedule: Trigger<typeof DailySummaryWorkflow.definition> = {
   type: TriggerTypes.Scheduled,
@@ -18,7 +19,6 @@ const dailySummarySchedule: Trigger<typeof DailySummaryWorkflow.definition> = {
   },
   schedule: {
     start_time: "2026-10-02T13:00:00Z", // 9am EDT
-
     timezone: "America/New_York",
     frequency: {
       type: "weekly",
