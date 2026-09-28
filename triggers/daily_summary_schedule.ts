@@ -17,7 +17,7 @@ const dailySummarySchedule: Trigger<typeof DailySummaryWorkflow.definition> = {
     channel_id: { value: PR_CHANNEL_ID },
   },
   schedule: {
-    start_time: "2025-01-06T09:00:00Z",
+    start_time: "2026-10-05T09:00:00Z",
     timezone: "America/New_York",
     frequency: {
       type: "weekly",
