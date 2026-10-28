@@ -64,6 +64,13 @@ const PrTrackingDatastore = DefineDatastore({
     merged: {
       type: Schema.types.boolean,
     },
+    // Closed without merging
+    closed: {
+      type: Schema.types.boolean,
+    },
+    draft: {
+      type: Schema.types.boolean,
+    },
     last_checked_date: {
       type: Schema.types.string,
     },

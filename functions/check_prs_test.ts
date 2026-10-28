@@ -498,6 +498,101 @@ Deno.test("tracks multiple PR links in one message independently, excluding merg
   assertEquals(postedText.includes("PR #20"), false);
 });
 
+Deno.test("drops closed and draft PRs from the report, but brings back a reopened one", async () => {
+  let postedText = "";
+
+  using _stubFetch = stub(
+    globalThis,
+    "fetch",
+    async (url: string | URL | Request, options?: RequestInit) => {
+      const request = url instanceof Request ? url : new Request(url, options);
+
+      if (request.url === "https://slack.com/api/conversations.history") {
+        return jsonResponse({
+          ok: true,
+          messages: [
+            {
+              ts: "1000.0009",
+              user: "U_AUTHOR",
+              text: "3 of mine open for review:\n" +
+                "https://github.com/acme/widgets/pull/50\n" +
+                "https://github.com/acme/widgets/pull/51\n" +
+                "https://github.com/acme/widgets/pull/52",
+            },
+          ],
+        });
+      }
+      // All three were closed as of the last run.
+      if (request.url === "https://slack.com/api/apps.datastore.get") {
+        const body = await request.formData();
+        return jsonResponse({
+          ok: true,
+          datastore: body.get("datastore"),
+          item: { pr_key: "existing", closed: true },
+        });
+      }
+      if (request.url === "https://slack.com/api/chat.getPermalink") {
+        return jsonResponse({
+          ok: true,
+          permalink: "https://acme.slack.com/archives/C0123456789/p10000009",
+        });
+      }
+      if (
+        request.url === "https://api.github.com/repos/acme/widgets/pulls/50"
+      ) {
+        return jsonResponse({ merged: false, state: "closed", draft: false });
+      }
+      if (
+        request.url === "https://api.github.com/repos/acme/widgets/pulls/51"
+      ) {
+        return jsonResponse({ merged: false, state: "open", draft: true });
+      }
+      if (
+        request.url === "https://api.github.com/repos/acme/widgets/pulls/52"
+      ) {
+        return jsonResponse({ merged: false, state: "open", draft: false });
+      }
+      if (
+        request.url ===
+          "https://api.github.com/repos/acme/widgets/pulls/52/reviews"
+      ) {
+        return jsonResponse([]);
+      }
+      if (request.url === "https://slack.com/api/apps.datastore.put") {
+        const body = await request.formData();
+        return jsonResponse({
+          ok: true,
+          datastore: body.get("datastore"),
+          item: JSON.parse(body.get("item") as string),
+        });
+      }
+      if (request.url === "https://slack.com/api/chat.postMessage") {
+        const body = await request.formData();
+        const blocks = JSON.parse(body.get("blocks") as string) as {
+          text?: { text: string };
+          elements?: { text: string }[];
+        }[];
+        postedText = blocks.map((b) =>
+          b.text?.text ?? b.elements?.map((e) => e.text).join(" ") ?? ""
+        ).join("\n");
+        return jsonResponse({ ok: true, ts: "2000.0009" });
+      }
+      throw new Error(`Unexpected fetch to ${request.url}`);
+    },
+  );
+
+  const inputs = { channel_id: CHANNEL_ID };
+  const { error } = await CheckPrsFunction(
+    createContext({ inputs, env: { GITHUB_TOKEN: "test-token" } }),
+  );
+
+  assertEquals(error, undefined);
+  assertStringIncludes(postedText, "Needs a first look (1)");
+  assertStringIncludes(postedText, "PR #52");
+  assertEquals(postedText.includes("PR #50"), false);
+  assertEquals(postedText.includes("PR #51"), false);
+});
+
 Deno.test("counts a new 👀 once per linked PR toward the fun stat", async () => {
   let postedText = "";
 
