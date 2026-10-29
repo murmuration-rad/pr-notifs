@@ -68,6 +68,8 @@ type PrItem = {
   first_seen_looking_date: string;
   looking_user_ids: string[];
   merged: boolean;
+  closed: boolean;
+  draft: boolean;
   last_checked_date: string;
 };
 
@@ -145,19 +147,21 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
+type GitHubPrState = "open" | "draft" | "closed" | "merged";
+
 // Auth: uses a personal access token for now (fine for the experiment
 // stage). A GitHub App is the recommended long-term pattern for this kind
 // of unattended read-only automation — see the "Future Improvements"
 // section in the README. This function is the only place GitHub auth
 // happens, so it should be a self-contained swap later.
-export async function fetchGitHubMergedState(
+export async function fetchGitHubPrState(
   owner: string,
   repo: string,
   prNumber: number,
   token: string | undefined,
-): Promise<boolean | undefined> {
+): Promise<GitHubPrState | undefined> {
   if (!token) {
-    console.error("GITHUB_TOKEN is not set; skipping merge check");
+    console.error("GITHUB_TOKEN is not set; skipping PR state check");
     return undefined;
   }
   try {
@@ -178,7 +182,10 @@ export async function fetchGitHubMergedState(
       return undefined;
     }
     const body = await res.json();
-    return body.merged === true;
+    if (body.merged === true) return "merged";
+    if (body.state === "closed") return "closed";
+    if (body.draft === true) return "draft";
+    return "open";
   } catch (err) {
     console.error(`GitHub API request failed: ${err}`);
     return undefined;
@@ -295,6 +302,8 @@ export default SlackFunction(
           }
 
           const existing = getResponse.item as Partial<PrItem>;
+          // Merged is final. Closed and draft PRs can come back (reopened,
+          // marked ready for review), so they still get checked each run.
           if (existing.merged === true) return null;
 
           const isNewRecord = !existing.pr_key;
@@ -329,17 +338,20 @@ export default SlackFunction(
           // approved in Slack — a PR can get merged without ever picking up
           // a 👀 or ✅ reaction (e.g. merged directly on GitHub), and we'd
           // otherwise keep reporting it as needing a first look forever.
-          const mergedState = await fetchGitHubMergedState(
+          const prState = await fetchGitHubPrState(
             owner,
             repo,
             prNumber,
             githubToken,
           );
-          const merged = mergedState === true;
+          const merged = prState === "merged";
+          const closed = prState === "closed";
+          const draft = prState === "draft";
 
-          // Skip the extra API call once merged — it'll be excluded from
-          // every category below regardless of approval state.
-          const githubApproved = merged
+          // Skip the extra API call once merged, closed, or in draft — it'll
+          // be excluded from every category below regardless of approval
+          // state.
+          const githubApproved = merged || closed || draft
             ? false
             : (await fetchGitHubApprovalState(
               owner,
@@ -363,6 +375,8 @@ export default SlackFunction(
             first_seen_looking_date: firstSeenLookingDate,
             looking_user_ids: lookingUsersNow,
             merged,
+            closed,
+            draft,
             last_checked_date: today,
           };
 
@@ -397,7 +411,7 @@ export default SlackFunction(
         todaysLookCounts.set(userId, (todaysLookCounts.get(userId) ?? 0) + 1);
       }
 
-      if (item.merged) continue;
+      if (item.merged || item.closed || item.draft) continue;
 
       // Categorization uses GitHub's real approval state (item.github_approved),
       // not the shared Slack ✅ reaction (item.has_approved) — see the

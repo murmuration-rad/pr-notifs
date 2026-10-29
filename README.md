@@ -113,6 +113,10 @@ post). Each linked PR is tracked and merge-checked independently, so a batch
 message with some PRs already merged and some still open will only show the
 still-open ones.
 
+Closed and draft PRs drop out of every section. Unlike merged PRs, they still
+get checked each run, so a PR that's reopened or marked ready for review comes
+back.
+
 "Approved, ready to merge" is based on GitHub's actual review state per PR
 (`fetchGitHubApprovalState` in `functions/check_prs.ts`), not the Slack ✅
 reaction — a message's ✅ can't tell us which specific linked PR it was meant
@@ -180,7 +184,7 @@ $ slack activity --tail
 ## Future Improvements
 
 **Auth: migrate from PAT to a GitHub App.** This bot currently authenticates to
-GitHub with a personal access token (see `fetchGitHubMergedState` in
+GitHub with a personal access token (see `fetchGitHubPrState` in
 `functions/check_prs.ts`). That's fine for the current experiment stage, but a
 GitHub App is the better long-term pattern for this kind of narrow, unattended,
 read-only automation: it's scoped to an install rather than a person's account,
@@ -190,7 +194,7 @@ relevant repo(s), sign a JWT and exchange it for an installation access token on
 each run instead of reading a static token from env) so it's been deferred until
 this graduates past experiment. See
 [murmuration-rad/pr-notifs#1](https://github.com/murmuration-rad/pr-notifs/issues/1)
-for the tracking issue. `fetchGitHubMergedState` is the only place GitHub auth
+for the tracking issue. `fetchGitHubPrState` is the only place GitHub auth
 happens, so swapping it out later should be a self-contained change.
 
 ## Resources
